@@ -1,0 +1,9 @@
+{
+  "name": "leetcode-practice-mcp",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@jinzcdev/leetcode-mcp-server": "1.4.0",
+    "@modelcontextprotocol/sdk": "1.32.1"
+  }
+}
