@@ -23,7 +23,7 @@
 import { spawn } from 'node:child_process';
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 const CHROME = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
@@ -58,6 +58,11 @@ if (watchMode) {
 const PROFILE = join(tmpdir(), `lc-chrome-profile-${PORT}`);
 const BASE = `http://127.0.0.1:${PORT}`;
 const STOP_FILE = ledgerPath ? join(ledgerPath, '..', 'STOP') : null;
+// The driver's private ledger. It sits beside the main one and is written only
+// by the driver, so the two never contend for the same file.
+const SESSION_LEDGER = ledgerPath
+  ? join(dirname(ledgerPath), 'session-accepted.json')
+  : null;
 
 async function readJson(path, fallback) {
   if (!path) return fallback;
@@ -68,8 +73,8 @@ async function readJson(path, fallback) {
   }
 }
 
-/** Every solution file whose slug is not Accepted and whose id is known. */
-async function scanPending(ledger, questionIds) {
+/** Every solution file not accepted in either ledger and with a known id. */
+async function scanPending(ledger, session, questionIds) {
   const names = await readdir(solutionsDir);
   const found = [];
   for (const name of names) {
@@ -81,6 +86,7 @@ async function scanPending(ledger, questionIds) {
     const slug = stem.slice(dash + 1);
     if (!Number.isFinite(frontendId)) continue;
     if (ledger[slug]?.statusMsg === 'Accepted') continue;
+    if (session[slug]?.statusMsg === 'Accepted') continue;
     if (questionIds[slug] === undefined) continue;
     found.push({
       frontendId,
@@ -234,19 +240,23 @@ const results = [];
 let chrome = null;
 
 /**
- * Record an acceptance in the ledger immediately.
+ * Record an acceptance in the driver's OWN ledger, next to the main one.
  *
- * Without this the driver only ever READS the ledger, so a second watch window
- * starts before the Lead has merged the first one's results and re-submits
- * everything it just accepted. That happened: ten problems were submitted twice
- * and the duplicate traffic was pure waste against a per-account rate limit.
- * Only one submitter runs at a time, so this read-modify-write cannot race.
+ * The driver used to write the main ledger directly. That fixed the duplicate
+ * submissions, but it made two writers share one file: a Lead merge landing in
+ * the same instant as a driver write could clobber the other. The submitter
+ * spotted that residual race and it is real.
+ *
+ * So ownership is now split. The driver only ever writes session-accepted.json,
+ * which nothing else touches; the Lead only ever writes accepted.json, which the
+ * driver only reads. scanPending() consults both, so a slug stops being pending
+ * the moment the driver accepts it, with no shared mutable file.
  */
 async function recordAccepted(record) {
-  if (!ledgerPath || record.statusMsg !== 'Accepted') return;
+  if (!SESSION_LEDGER || record.statusMsg !== 'Accepted') return;
   try {
-    const ledger = await readJson(ledgerPath, {});
-    ledger[record.slug] = {
+    const session = await readJson(SESSION_LEDGER, {});
+    session[record.slug] = {
       statusMsg: 'Accepted',
       totalCorrect: record.totalCorrect,
       totalTestcases: record.totalTestcases,
@@ -254,9 +264,9 @@ async function recordAccepted(record) {
       url: record.url,
       source: 'cdp-submit',
     };
-    await writeFile(ledgerPath, JSON.stringify(ledger, null, 1), 'utf8');
+    await writeFile(SESSION_LEDGER, JSON.stringify(session, null, 1), 'utf8');
   } catch (error) {
-    console.error(`ledger write failed for ${record.slug}: ${error.message}`);
+    console.error(`session ledger write failed for ${record.slug}: ${error.message}`);
   }
 }
 
@@ -357,8 +367,9 @@ try {
         break;
       }
       const ledger = await readJson(ledgerPath, {});
+      const session = await readJson(SESSION_LEDGER, {});
       const questionIds = await readJson(questionIdsPath, {});
-      const pending = await scanPending(ledger, questionIds);
+      const pending = await scanPending(ledger, session, questionIds);
 
       if (pending.length === 0) {
         idlePolls += 1;

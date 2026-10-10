@@ -1,4 +1,15 @@
-"""Fold browser-submit results into the local AC ledger."""
+"""Fold browser-submit results into the local AC ledger.
+
+Two sources feed the ledger:
+
+  - session-accepted.json, written by the driver itself the moment a submission
+    is Accepted. It is the driver's private file, so folding it in cannot race
+    with the driver's own writes.
+  - the submit-*.json result files, which carry the full per-problem record
+    including any judge diagnostics.
+
+Both are idempotent: merging twice produces the same ledger.
+"""
 import glob
 import json
 import os
@@ -13,6 +24,26 @@ with open(LEDGER, encoding='utf-8') as handle:
     ledger = json.load(handle)
 
 updated = 0
+
+# 1. The driver's own ledger, keyed by slug already.
+session_path = os.path.join(DIR, 'session-accepted.json')
+if os.path.exists(session_path):
+    with open(session_path, encoding='utf-8') as handle:
+        session = json.load(handle)
+    for slug, record in session.items():
+        if record.get('statusMsg') != 'Accepted':
+            continue
+        ledger[slug] = {
+            'statusMsg': 'Accepted',
+            'totalCorrect': record.get('totalCorrect'),
+            'totalTestcases': record.get('totalTestcases'),
+            'submissionId': record.get('submissionId'),
+            'url': record.get('url'),
+            'source': 'session-accepted.json',
+        }
+        updated += 1
+
+# 2. The result files.
 patterns = ('cdp*result*.json', 'parallel-*-result.json', 'submit-*-result.json')
 seen = set()
 for pattern in patterns:
