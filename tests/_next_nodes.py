@@ -65,6 +65,25 @@ def levels(root) -> list:
     return groups
 
 
+def to_values(root) -> list:
+    """LeetCode level-order list for a tree (trailing nulls cut)."""
+    if root is None:
+        return []
+    values = []
+    queue = collections.deque([root])
+    while queue:
+        node = queue.popleft()
+        if node is None:
+            values.append(None)
+            continue
+        values.append(node.val)
+        queue.append(node.left)
+        queue.append(node.right)
+    while values and values[-1] is None:
+        values.pop()
+    return values
+
+
 def link_levels(root) -> "Node | None":
     """Definitional oracle: chain each level with a plain level-order BFS."""
     for group in levels(root):
