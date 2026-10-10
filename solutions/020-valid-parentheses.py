@@ -1,32 +1,25 @@
+# 20. Valid Parentheses
+# https://leetcode.com/problems/valid-parentheses/
 #
-# @lc app=leetcode id=20 lang=python3
+# A single stack decides the whole string: push every opening bracket, and on a
+# closing bracket require that the stack top is its matching opener. That single
+# rule rejects both an unmatched closer (empty stack or wrong top) and an
+# unmatched opener (stack non-empty at the end), so one left-to-right pass is
+# sufficient and no backtracking is needed.
 #
-# [20] Valid Parentheses
-#
+# Time: O(n)   Space: O(n) worst case (a string of only opening brackets)
 
-# @lc code=start
 class Solution:
     def isValid(self, s: str) -> bool:
-        """
-        Validates if parentheses in string follow correct order rules.
-        Uses stack-based approach for O(n) time complexity.
-        """
-        # Stack-based approach using hash mapping
-        stack = []
-        # Dictionary mapping closing to opening brackets
         bracket_map = {')': '(', '}': '{', ']': '['}
         opening_brackets = set(bracket_map.values())
-        
+        stack = []
+
         for char in s:
-            # If character is opening bracket, push to stack
             if char in opening_brackets:
                 stack.append(char)
-            # If character is closing bracket
             elif char in bracket_map:
-                # Check if stack is empty or mismatch
                 if not stack or stack.pop() != bracket_map[char]:
                     return False
-        
-        # Return True if stack is empty (all brackets matched)
+
         return not stack
-# @lc code=end
