@@ -15,10 +15,17 @@ where the maximizing pair happens to be unique.
 import itertools
 import random
 import unittest
+from pathlib import Path
 
 from _loader import load_solution
 
-Solution = load_solution('101204-maximum-product-pair-with-target-sum.py').Solution
+# Contest material is filed under contest/<contest name>/, not solutions/.
+CONTEST_DIR = (
+    Path(__file__).resolve().parents[1] / 'contest' / 'Biweekly Contest 193'
+)
+Solution = load_solution(
+    'q1-maximum-product-pair-with-target-sum.py', CONTEST_DIR
+).Solution
 
 NO_PAIR = [-1, -1]
 
