@@ -73,6 +73,20 @@ def oracle(root) -> list[list[int]]:
     return result
 
 
+def random_structure(rng, size: int):
+    """A random binary tree with `size` nodes, as a nested (value, l, r) tuple.
+
+    Splitting the node count at a random point avoids enumerating shapes, which
+    is only feasible for single-digit sizes.
+    """
+    if size == 0:
+        return None
+    left_size = rng.randint(0, size - 1)
+    return (rng.randint(-1000, 1000),
+            random_structure(rng, left_size),
+            random_structure(rng, size - 1 - left_size))
+
+
 def left_chain(size: int, value: int = 0) -> TreeNode:
     root = None
     for _ in range(size):
@@ -124,8 +138,7 @@ class BinaryTreeLevelOrderTraversalTests(unittest.TestCase):
         rng = random.Random(1020)
         for _ in range(200):
             size = rng.randint(1, 30)
-            root = from_structure(fill_preorder(rng.choice(shapes(size)),
-                                                [rng.randint(-1000, 1000) for _ in range(size)]))
+            root = from_structure(random_structure(rng, size))
             result = self.solve(root)
             expected = oracle(root)
             with self.subTest(size=size):
@@ -139,8 +152,7 @@ class BinaryTreeLevelOrderTraversalTests(unittest.TestCase):
         rng = random.Random(1021)
         for _ in range(300):
             size = rng.randint(1, 60)
-            root = from_structure(fill_preorder(rng.choice(shapes(size)),
-                                                [rng.randint(-1000, 1000) for _ in range(size)]))
+            root = from_structure(random_structure(rng, size))
             with self.subTest(size=size):
                 self.assertEqual(self.solve(root), oracle(root))
 

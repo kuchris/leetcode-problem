@@ -10,8 +10,9 @@
 # recorded only at a leaf (no children) with remaining == 0, which implements
 # "root-to-leaf"; an empty tree yields no paths.
 #
-# Time: O(n * h) worst case (each of the n nodes holds a path of up to h values)
-# Space: O(n * h) for the stack in the worst case, or O(h) for a chain
+# Time: O(n * h) worst case   Space: O(n * h) worst case, O(h) for a chain
+#       (h = tree height; each of the n nodes may carry a copy of a path of up
+#       to h values, both for the time spent copying and for the stack)
 
 class Solution:
     def pathSum(self, root: "TreeNode | None", targetSum: int) -> list[list[int]]:

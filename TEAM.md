@@ -58,21 +58,23 @@ solver-4 (#125-132) ─┘                              │
 
 | 檔案 | 寫入者 | 讀取者 | 內容 |
 |---|---|---|---|
-| `%TEMP%\lc-fetch\accepted.json` | lead | 全部 | slug → Accepted 記錄（**權威**） |
-| `%TEMP%\lc-fetch\question-ids.json` | lead | submitter | slug → 內部 `questionId` |
-| `%TEMP%\lc-fetch\slugs-solverN.json` | lead | solver N | 預留嘅題目清單 |
-| `%TEMP%\lc-fetch\submit-*.json` | submitter | lead, qa-1 | 提交結果 + judge 診斷 |
-| `%TEMP%\lc-fetch\qa-failures.json` | qa-1 | lead | 修復簡報 |
-| `%TEMP%\lc-fetch\STOP` | lead | submitter | 叫停 watch mode |
+| `tools/agent/state/accepted.json` | lead | 全部 | slug → Accepted 記錄（**權威**） |
+| `tools/agent/state/question-ids.json` | lead | submitter | slug → 內部 `questionId` |
+| `tools/agent/state/slugs-solverN.json` | lead | solver N | 預留嘅題目清單 |
+| `tools/agent/state/submit-*.json` | submitter | lead, qa-1 | 提交結果 + judge 診斷 |
+| `tools/agent/state/qa-failures.json` | qa-1 | lead | 修復簡報 |
+| `tools/agent/state/STOP` | lead | submitter | 叫停 watch mode |
+
+`state/` 係 gitignored：佢每次提交都變，納入版本控制只會製造噪音。可以用 `LC_STATE` 環境變數覆寫位置。
 
 ### 點解要用預留批次
 
 `select-batch.py` 只寫一個共享 `slugs.json`。如果 4 個 solver 同時跑，佢哋會揀到**同一批題目**——呢個係 race condition。
 
-`reserve-batches.py` 一次過鎖定所有 solver 嘅範圍，確保零重疊：
+`tools/agent/reserve-batches.py` 一次過鎖定所有 solver 嘅範圍，確保零重疊：
 
 ```powershell
-python "$env:TEMP\lc-fetch\reserve-batches.py" 4 8   # 4 個 solver，每人 8 題
+python .\tools\agent\reserve-batches.py 4 8   # 4 個 solver，每人 8 題
 ```
 
 Solver 收到自己嘅 `slugs-solverN.json`，**嚴禁**再跑 `select-batch.py`。
@@ -272,7 +274,9 @@ QA 唔會因為勤力而出錯，會因為**證據不完整**而出錯。
 
 ## 9. 工具清單
 
-全部喺 `%TEMP%\lc-fetch\`（**臨時目錄，建議搬入 `tools/agent/` 以持久保存**）。
+全部喺 `tools/agent/`，狀態資料喺 `tools/agent/state/`（gitignored）。
+
+所有路徑都**相對腳本自身**解析（`LC_STATE` / `LC_REPO` 可覆寫），所以換 checkout 都用得。
 
 ### 題庫／選題
 
@@ -352,9 +356,10 @@ python "$d\qa-repro.py" <slug> --from-result <result.json>   # 直接抽 judge �
 
 ## 11. 未解決 / 可改進
 
-1. **工具喺 `%TEMP%`** —— 會被清理。建議搬入 `tools/agent/` 並納入版本控制。
+1. ~~**工具喺 `%TEMP%`**~~ —— **已完成**：搬入 `tools/agent/`，路徑改為相對解析，狀態放 gitignored 嘅 `state/`。
 2. **`select-batch.py` 嘅 race condition** —— 已用 `reserve-batches.py` 繞過，但根本修復應該係畀 `select-batch.py` 支援 `--output` 同 atomic reservation。
 3. **README 嘅 `npm ci` 指引喺本機唔適用** —— `npm.ps1` 被 Execution Policy 擋，要用 `npm.cmd`。
 4. **Legacy 命名唔一致** —— `014-`、`020-` 用 zero-padded 3 位，新檔案用無 padding。另有 2 個 legacy solution 冇測試。
-5. **QA 證據視野** —— qa-1 只掃 result 檔會漏掉經 MCP 路徑記錄嘅成功提交。已糾正，但值得考慮畀 qa-1 一個統一嘅提交歷史查詢工具。
+5. **QA 證據視野** —— qa-1 只掃 result 檔會漏掉經 MCP 路徑記錄嘅成功提交。已用 `qa-open-failures.py` 嘅 ledger 排序檢查修正，但值得考慮一個統一嘅提交歷史查詢工具。
 6. **`spawn_teammate` 冇 thinking level 參數** —— 只能喺 prompt 層面要求高強度推理。
+7. **`state/` 未備份** —— ledger 係本 session 82 次 AC 嘅唯一完整記錄，而且 gitignored。值得定期匯出一個精簡版本（只留 slug + submissionId）入 repo。

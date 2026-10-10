@@ -79,6 +79,20 @@ def geometric_depth(root) -> int:
     return depth
 
 
+def random_structure(rng, size: int):
+    """A random binary tree with `size` nodes, as a nested (value, l, r) tuple.
+
+    Splitting the node count at a random point avoids enumerating shapes, which
+    is only feasible for single-digit sizes.
+    """
+    if size == 0:
+        return None
+    left_size = rng.randint(0, size - 1)
+    return (rng.randint(-100, 100),
+            random_structure(rng, left_size),
+            random_structure(rng, size - 1 - left_size))
+
+
 def chain(size: int, to_the_left: bool = True, value: int = 0) -> TreeNode:
     """A chain of `size` nodes built iteratively (deepest possible shape)."""
     root = None
@@ -145,8 +159,7 @@ class MaximumDepthOfBinaryTreeTests(unittest.TestCase):
         rng = random.Random(1040)
         for _ in range(400):
             size = rng.randint(1, 80)
-            root = from_structure(fill_preorder(rng.choice(shapes(size)),
-                                                [rng.randint(-100, 100) for _ in range(size)]))
+            root = from_structure(random_structure(rng, size))
             with self.subTest(size=size):
                 self.assertEqual(self.solve(root), dfs_depth(root))
                 self.assertEqual(self.solve(root), geometric_depth(root))
@@ -162,17 +175,17 @@ class MaximumDepthOfBinaryTreeTests(unittest.TestCase):
         self.assertEqual(self.solve(complete), 14)
         self.assertEqual(dfs_depth(complete), 14)
 
-        # A caterpillar: a spine where every node also carries a leaf, so the
-        # longest path runs the whole spine. 5000 spine nodes + 5000 leaves is
-        # exactly 10^4 nodes.
+        # A caterpillar: a spine where every node also carries a leaf. 5000 spine
+        # nodes plus 5000 leaves is exactly 10^4 nodes, and the longest path is
+        # the spine plus the leaf hanging off its deepest node.
         spine = None
         for _ in range(size // 2):
             node = TreeNode(0)
             node.left = spine
             node.right = TreeNode(0)
             spine = node
-        self.assertEqual(self.solve(spine), size // 2)
-        self.assertEqual(dfs_depth(spine), size // 2)
+        self.assertEqual(self.solve(spine), size // 2 + 1)
+        self.assertEqual(dfs_depth(spine), size // 2 + 1)
 
 
 if __name__ == '__main__':

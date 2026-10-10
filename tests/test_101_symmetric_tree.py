@@ -91,6 +91,20 @@ def fill_preorder(shape, values):
     return walk(shape)
 
 
+def random_structure(rng, size: int):
+    """A random binary tree with `size` nodes, as a nested (value, l, r) tuple.
+
+    Splitting the node count at a random point avoids enumerating shapes, which
+    is only feasible for single-digit sizes.
+    """
+    if size == 0:
+        return None
+    left_size = rng.randint(0, size - 1)
+    return (rng.randint(-100, 100),
+            random_structure(rng, left_size),
+            random_structure(rng, size - 1 - left_size))
+
+
 def mirror_tree(root) -> "TreeNode | None":
     """Iterative mirror clone of a tree."""
     if root is None:
@@ -194,11 +208,19 @@ class SymmetricTreeTests(unittest.TestCase):
                                    (2, (5, None, None), (6, None, None)))), False)
 
     def test_same_values_all_the_way_down_still_needs_the_shape(self):
-        # Equal values everywhere: a left chain must still be rejected, because
+        # Equal values everywhere: a chain must still be rejected, because
         # symmetry is about the shape as much as the values.
         self.assertFalse(self.solve(chain(4, True, 0)))
         self.assertFalse(self.solve(chain(4, False, 0)))
-        self.assertTrue(self.solve(complete_tree(7)))
+        # A perfect shape is not enough either: the values at mirrored positions
+        # must match, and these are all different.
+        self.assertFalse(self.solve(complete_tree(7)))
+        # The same perfect shape with equal values is symmetric.
+        equal = from_structure((0, (0, (0, None, None), (0, None, None)),
+                                (0, (0, None, None), (0, None, None))))
+        self.assertTrue(self.solve(equal))
+        self.assertTrue(structural_oracle(equal))
+        self.assertTrue(positional_oracle(equal))
 
     def test_every_shape_paired_with_its_mirror_is_symmetric(self):
         for size in range(0, 7):
@@ -231,8 +253,7 @@ class SymmetricTreeTests(unittest.TestCase):
         rng = random.Random(1010)
         for _ in range(400):
             size = rng.randint(1, 40)
-            values = [rng.randint(-100, 100) for _ in range(size)]
-            root = from_structure(fill_preorder(rng.choice(shapes(size)), values))
+            root = from_structure(random_structure(rng, size))
             with self.subTest(size=size):
                 self.assertEqual(self.solve(root), structural_oracle(root))
                 self.assertEqual(self.solve(root), positional_oracle(root))
@@ -241,8 +262,7 @@ class SymmetricTreeTests(unittest.TestCase):
         rng = random.Random(1011)
         for _ in range(100):
             size = rng.randint(0, 25)
-            half = fill_preorder(rng.choice(shapes(size)),
-                                 [rng.randint(-100, 100) for _ in range(size)])
+            half = random_structure(rng, size)
             root = TreeNode(rng.randint(-100, 100),
                             from_structure(half), from_structure(mirror(half)))
             with self.subTest(size=size):

@@ -1,3 +1,7 @@
 node_modules/
 .codex/config.toml
 __pycache__/
+
+# Mutable agent state (submission ledger, fetched problem data). It changes on
+# every submission, so it is kept locally rather than versioned.
+tools/agent/state/

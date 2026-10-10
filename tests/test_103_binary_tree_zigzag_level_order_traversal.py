@@ -98,6 +98,20 @@ def structure_problem(result, root) -> "str | None":
     return None
 
 
+def random_structure(rng, size: int):
+    """A random binary tree with `size` nodes, as a nested (value, l, r) tuple.
+
+    Splitting the node count at a random point avoids enumerating shapes, which
+    is only feasible for single-digit sizes.
+    """
+    if size == 0:
+        return None
+    left_size = rng.randint(0, size - 1)
+    return (rng.randint(-100, 100),
+            random_structure(rng, left_size),
+            random_structure(rng, size - 1 - left_size))
+
+
 def left_chain(size: int, value: int = 0) -> TreeNode:
     root = None
     for _ in range(size):
@@ -165,8 +179,7 @@ class BinaryTreeZigzagLevelOrderTraversalTests(unittest.TestCase):
         rng = random.Random(1030)
         for _ in range(300):
             size = rng.randint(1, 60)
-            root = from_structure(fill_preorder(rng.choice(shapes(size)),
-                                                [rng.randint(-100, 100) for _ in range(size)]))
+            root = from_structure(random_structure(rng, size))
             with self.subTest(size=size):
                 result = self.solve(root)
                 self.assertEqual(result, oracle(root))
