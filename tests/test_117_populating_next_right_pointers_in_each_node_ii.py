@@ -18,7 +18,6 @@ maximum) cover a complete tree, both chains, and a sparse random tree.
 """
 
 import itertools
-import collections
 import random
 import unittest
 
