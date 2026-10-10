@@ -233,6 +233,33 @@ const LOGIN_SCRIPT = `async () => {
 const results = [];
 let chrome = null;
 
+/**
+ * Record an acceptance in the ledger immediately.
+ *
+ * Without this the driver only ever READS the ledger, so a second watch window
+ * starts before the Lead has merged the first one's results and re-submits
+ * everything it just accepted. That happened: ten problems were submitted twice
+ * and the duplicate traffic was pure waste against a per-account rate limit.
+ * Only one submitter runs at a time, so this read-modify-write cannot race.
+ */
+async function recordAccepted(record) {
+  if (!ledgerPath || record.statusMsg !== 'Accepted') return;
+  try {
+    const ledger = await readJson(ledgerPath, {});
+    ledger[record.slug] = {
+      statusMsg: 'Accepted',
+      totalCorrect: record.totalCorrect,
+      totalTestcases: record.totalTestcases,
+      submissionId: record.submissionId,
+      url: record.url,
+      source: 'cdp-submit',
+    };
+    await writeFile(ledgerPath, JSON.stringify(ledger, null, 1), 'utf8');
+  } catch (error) {
+    console.error(`ledger write failed for ${record.slug}: ${error.message}`);
+  }
+}
+
 async function attempt(cdp, task, code) {
   const navigation = cdp.waitFor('Page.loadEventFired', 60000);
   await cdp.send('Page.navigate', { url: `https://leetcode.com/problems/${task.slug}/` });
@@ -284,6 +311,7 @@ async function submitOne(cdp, task) {
   }
   results.push(record);
   await writeFile(resultsFile, JSON.stringify(results, null, 2), 'utf8');
+  await recordAccepted(record);
   return record;
 }
 
