@@ -93,6 +93,22 @@ async function readJson(path, fallback) {
   }
 }
 
+/**
+ * Slugs already submitted in THIS window.
+ *
+ * recordAccepted() records only Accepted verdicts, so a failing slug stays
+ * "pending" in both ledgers and scanPending would offer it again on every poll.
+ * That produced a retry storm: one deterministically broken SQL problem was
+ * submitted twelve times, roughly every forty seconds, each attempt burning the
+ * per-account rate budget with no new information. The submitter killed the
+ * window by hand to stop it.
+ *
+ * The set is deliberately in-memory rather than persisted. Within a window a slug
+ * is submitted at most once; a repaired solution is picked up by the next window,
+ * which is the behaviour a repair loop needs.
+ */
+const attempted = new Set();
+
 /** Every solution file not accepted in either ledger and with a known id. */
 async function scanPending(ledger, session, questionIds) {
   const names = await readdir(solutionsDir);
@@ -110,6 +126,7 @@ async function scanPending(ledger, session, questionIds) {
     if (!Number.isFinite(frontendId)) continue;
     if (ledger[slug]?.statusMsg === 'Accepted') continue;
     if (session[slug]?.statusMsg === 'Accepted') continue;
+    if (attempted.has(slug)) continue;
     if (questionIds[slug] === undefined) continue;
     found.push({
       frontendId,
@@ -420,6 +437,7 @@ try {
       for (const task of pending) {
         if (Date.now() >= deadline) break;
         if (STOP_FILE && existsSync(STOP_FILE)) break;
+        attempted.add(task.slug);
         await submitOne(cdp, task);
         submittedTotal += 1;
         await sleep(interDelayMs);
