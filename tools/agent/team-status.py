@@ -1,4 +1,9 @@
-"""One-shot status report for the LeetCode team."""
+"""One-shot status report for the LeetCode team.
+
+Counts solutions in all three submitted languages, and reads the driver's session
+ledger as well as the main one, so a run that has not been merged yet still shows
+up rather than looking like pending work.
+"""
 import glob
 import json
 import os
@@ -10,19 +15,42 @@ DIR = os.environ.get('LC_STATE') or os.path.join(
 REPO = os.environ.get('LC_REPO') or os.path.dirname(os.path.dirname(
     os.path.dirname(os.path.abspath(__file__))))
 
-with open(os.path.join(DIR, 'accepted.json'), encoding='utf-8') as handle:
-    ledger = json.load(handle)
-accepted = {s for s, r in ledger.items() if r.get('statusMsg') == 'Accepted'}
+LANGUAGES = {'.py': 'python3', '.sql': 'postgresql', '.sh': 'bash'}
+
+
+def accepted_slugs():
+    """Accepted in either ledger - the driver's own, and the merged main one."""
+    found = set()
+    for name in ('accepted.json', 'session-accepted.json'):
+        path = os.path.join(DIR, name)
+        if not os.path.exists(path):
+            continue
+        with open(path, encoding='utf-8') as handle:
+            ledger = json.load(handle)
+        found |= {s for s, r in ledger.items() if r.get('statusMsg') == 'Accepted'}
+    return found
+
+
+accepted = accepted_slugs()
 
 files = {}
-for path in glob.glob(os.path.join(REPO, 'solutions', '*.py')):
-    stem = os.path.basename(path)[:-3]
-    frontend_id, slug = stem.split('-', 1)
-    files[slug] = int(frontend_id)
+by_language = {}
+for extension, lang in LANGUAGES.items():
+    for path in glob.glob(os.path.join(REPO, 'solutions', '*' + extension)):
+        stem = os.path.basename(path)[: -len(extension)]
+        if '-' not in stem:
+            continue
+        frontend_id, slug = stem.split('-', 1)
+        if not frontend_id.isdigit():
+            continue
+        files[slug] = int(frontend_id)
+        by_language[lang] = by_language.get(lang, 0) + 1
 
 outstanding = sorted((i, s) for s, i in files.items() if s not in accepted)
 
 print(f'solution files : {len(files)}')
+print('  by language  : ' + ', '.join(
+    f'{lang} {count}' for lang, count in sorted(by_language.items())))
 print(f'accepted       : {len(accepted)}')
 print(f'outstanding    : {len(outstanding)}')
 if outstanding:
