@@ -49,13 +49,34 @@ def declared_entry_point(source: str) -> str:
 
 
 def header_ok(source: str, path_name: str, comment: str) -> bool:
-    """First non-blank line is ``<comment> <id>. <Title>``."""
+    """The first non-blank line is ``<comment> <id>. <Title>``.
+
+    A shell script may open with a shebang, which is legitimate and useful, so it
+    is skipped before the header is looked for.
+    """
     frontend_id = int(path_name.split('-', 1)[0])
-    for line in source.splitlines():
-        if not line.strip():
-            continue
-        return bool(re.match(rf'^\s*{re.escape(comment)}\s*{frontend_id}\.\s+\S', line))
-    return False
+    lines = [line for line in source.splitlines() if line.strip()]
+    if lines and lines[0].startswith('#!'):
+        lines = lines[1:]
+    if not lines:
+        return False
+    return bool(re.match(rf'^\s*{re.escape(comment)}\s*{frontend_id}\.\s+\S', lines[0]))
+
+
+def sql_statements(source: str):
+    """Split a SQL file into statements, ignoring comments and quoted bodies.
+
+    Dollar-quoted blocks (``$$ ... $$``) are how PostgreSQL writes a function
+    body, and the body contains semicolons of its own. Counting those as
+    statement separators would report a single CREATE FUNCTION as many
+    statements, which is why they are masked out first.
+    """
+    text = '\n'.join(
+        line for line in source.splitlines()
+        if not line.strip().startswith('--')
+    )
+    text = re.sub(r'\$\$.*?\$\$', '$$BODY$$', text, flags=re.DOTALL)
+    return [statement for statement in text.split(';') if statement.strip()]
 
 
 class SolutionConventionTests(unittest.TestCase):
@@ -144,26 +165,26 @@ class SolutionConventionTests(unittest.TestCase):
                     f'{path.name} has no "Time: ... Space: ..." complexity line',
                 )
 
-    def test_sql_solutions_are_a_single_query(self):
-        """A SQL submission is one statement, so a second statement separated by
-        a semicolon would be rejected by the judge."""
+    def test_sql_solutions_are_a_single_statement(self):
+        """A SQL submission is one statement.
+
+        It is not always a SELECT: 177 requires a function definition, and 196 is
+        a DELETE, so the check accepts any single statement that reads or writes.
+        """
         for path in self.solutions():
             if path.suffix != '.sql':
                 continue
             with self.subTest(file=path.name):
-                body = '\n'.join(
-                    line for line in path.read_text(encoding='utf-8').splitlines()
-                    if not line.strip().startswith('--')
-                )
-                statements = [s for s in body.split(';') if s.strip()]
+                statements = sql_statements(path.read_text(encoding='utf-8'))
                 self.assertEqual(
                     len(statements), 1,
                     f'{path.name} holds {len(statements)} statements; the judge '
-                    'runs a single query',
+                    'runs a single one',
                 )
                 self.assertRegex(
-                    statements[0].lower(), r'\bselect\b',
-                    f'{path.name} has no SELECT',
+                    statements[0].lower(),
+                    r'\b(select|delete|update|insert|create\s+(or\s+replace\s+)?function)\b',
+                    f'{path.name} has no query or function definition',
                 )
 
 

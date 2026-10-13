@@ -87,6 +87,34 @@ def unquoted_annotations(tree, lines):
     return bad
 
 
+def first_content_line(lines):
+    """The first non-blank line, skipping a shell script's shebang.
+
+    A shebang is legitimate and useful in a shell solution, so it is not treated
+    as a header violation.
+    """
+    content = [line for line in lines if line.strip()]
+    if content and content[0].startswith('#!'):
+        content = content[1:]
+    return content[0] if content else ''
+
+
+def sql_statements(source):
+    """Split a SQL file into statements, ignoring comments and quoted bodies.
+
+    Dollar-quoted blocks (``$$ ... $$``) are how PostgreSQL writes a function
+    body, and the body contains semicolons of its own. Counting those as
+    statement separators would report a single CREATE FUNCTION as many
+    statements.
+    """
+    text = '\n'.join(
+        line for line in source.splitlines()
+        if not line.strip().startswith('--')
+    )
+    text = re.sub(r'\$\$.*?\$\$', '$$BODY$$', text, flags=re.DOTALL)
+    return [statement for statement in text.split(';') if statement.strip()]
+
+
 def check(path):
     name = os.path.basename(path)
     match = re.match(r'^(\d+)-(.+)\.(py|sql|sh)$', name)
@@ -99,10 +127,11 @@ def check(path):
     lines = source.splitlines()
     comment = re.escape(COMMENT[extension])
 
-    if not lines or not re.match(rf'^\s*{comment}\s*{int(frontend_id)}\.\s+\S', lines[0]):
+    header_line = first_content_line(lines)
+    if not re.match(rf'^\s*{comment}\s*{int(frontend_id)}\.\s+\S', header_line):
         problems.append(
-            f'first line is not a "{COMMENT[extension]} <id>. <Title>" header: '
-            f'{lines[0][:60]!r}')
+            f'first content line is not a "{COMMENT[extension]} <id>. <Title>" '
+            f'header: {header_line[:60]!r}')
     if f'https://leetcode.com/problems/{slug}/' not in source:
         problems.append(f'missing problem URL for slug {slug}')
 
@@ -120,14 +149,14 @@ def check(path):
         notes.append('Time: and Space: are on separate comment lines')
 
     if extension == '.sql':
-        body = '\n'.join(
-            line for line in lines if not line.strip().startswith('--'))
-        statements = [s for s in body.split(';') if s.strip()]
+        statements = sql_statements(source)
         if len(statements) != 1:
             problems.append(
                 f'{len(statements)} statements; the judge runs a single one')
-        elif not re.search(r'\b(select|delete|update|insert)\b', statements[0], re.I):
-            problems.append('the statement is not a SELECT/DELETE/UPDATE/INSERT')
+        elif not re.search(
+                r'\b(select|delete|update|insert|create\s+(or\s+replace\s+)?function)\b',
+                statements[0], re.I):
+            problems.append('the statement is neither a query nor a function definition')
         return name, problems, notes
 
     if extension == '.sh':
