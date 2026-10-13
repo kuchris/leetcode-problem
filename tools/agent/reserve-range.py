@@ -4,7 +4,17 @@ Locked (paid-only) problems are excluded upstream: backlog.json is built from
 the free subset, so a gap in the id sequence here means the problem is either
 already solved or paywalled.
 
-Usage: python reserve-range.py <maxFrontendId> <solvers> [batchPerSolver]
+Non-Python problems are excluded by default. The pipeline produces and submits
+Python only (AGENTS.md: "Use Python 3 unless the user requests another
+language"), and LeetCode judges SQL and Shell problems in their own language, so
+handing one to a solver would produce a file that cannot be submitted.
+categories.json records the classification; it is built by fetching the range and
+reading topicTags, because neither the backlog nor codeSnippets carries a
+category.
+
+Pass --all to include every category.
+
+Usage: python reserve-range.py <maxFrontendId> <solvers> [batchPerSolver] [--all]
 """
 import glob
 import json
@@ -17,14 +27,23 @@ REPO = os.environ.get('LC_REPO') or os.path.dirname(os.path.dirname(
     os.path.dirname(os.path.abspath(__file__))))
 LEVELS = {1: 'Easy', 2: 'Medium', 3: 'Hard'}
 
-max_id = int(sys.argv[1])
-solvers = int(sys.argv[2]) if len(sys.argv) > 2 else 4
-per_solver = int(sys.argv[3]) if len(sys.argv) > 3 else 8
+args = [a for a in sys.argv[1:] if not a.startswith('--')]
+include_all = '--all' in sys.argv
+
+max_id = int(args[0])
+solvers = int(args[1]) if len(args) > 1 else 4
+per_solver = int(args[2]) if len(args) > 2 else 8
 
 with open(os.path.join(DIR, 'backlog.json'), encoding='utf-8') as handle:
     backlog = json.load(handle)
 with open(os.path.join(DIR, 'solved-slugs.json'), encoding='utf-8') as handle:
     solved = set(json.load(handle))
+
+categories = {}
+categories_path = os.path.join(DIR, 'categories.json')
+if os.path.exists(categories_path):
+    with open(categories_path, encoding='utf-8') as handle:
+        categories = json.load(handle)
 
 local_slugs = set()
 for path in glob.glob(os.path.join(REPO, 'solutions', '*.py')):
@@ -32,15 +51,29 @@ for path in glob.glob(os.path.join(REPO, 'solutions', '*.py')):
     local_slugs.add(name.split('-', 1)[1][:-3] if '-' in name else name[:-3])
 
 done = solved | local_slugs
-pending = [
+in_range = [
     row for row in backlog
     if row['slug'] not in done and row['frontendId'] <= max_id
 ]
-pending.sort(key=lambda row: row['frontendId'])
+in_range.sort(key=lambda row: row['frontendId'])
+
+skipped = {}
+pending = []
+for row in in_range:
+    category = categories.get(row['slug'], 'unknown')
+    if not include_all and category in ('SQL', 'Shell'):
+        skipped.setdefault(category, []).append(row)
+        continue
+    pending.append(row)
 
 print(f'target: frontend ids up to {max_id}')
-print(f'free and unsolved in range: {len(pending)}')
-print(f'  ' + ', '.join(str(row['frontendId']) for row in pending))
+print(f'free and unsolved in range: {len(in_range)}')
+print(f'  assignable (Python)     : {len(pending)}')
+for category, rows in sorted(skipped.items()):
+    ids = ', '.join(str(r['frontendId']) for r in rows)
+    print(f'  skipped {category:<7}          : {len(rows)}  ({ids})')
+if not categories:
+    print('  NOTE: categories.json absent - nothing was filtered by language')
 print()
 
 chunks = []
