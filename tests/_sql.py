@@ -5,17 +5,27 @@ the submit driver sends. SQLite is the only engine available locally without an
 install, so this harness is an approximation and says so rather than implying
 equivalence.
 
-Where they agree: joins, grouping, aggregate functions, subqueries, CTEs,
-window functions, string concatenation with `||`, `COALESCE`, `LIMIT`, and
+Where they agree: joins, grouping, aggregate functions, subqueries, CTEs, window
+functions, string concatenation with `||`, `COALESCE`, `LIMIT`, and
 `NULLS FIRST`/`LAST`. Where they differ: date and interval arithmetic, regular
-expressions, `DISTINCT ON`, `RETURNING`, and type coercion rules. A solution that
-needs one of those cannot be validated here and must be verified by submission.
+expressions, `DISTINCT ON`, `RETURNING`, type coercion, and the default NULL
+ordering under `DESC` (PostgreSQL puts NULLs first, SQLite puts them last).
 
-The schema comes from the problem's `metaData.database_schema`, and the rows from
+The schema comes from the problem's `metaData.database_schema` and the rows from
 `exampleTestcases`, so a test builds its database from the same definitions the
 judge uses instead of hand-writing CREATE TABLE statements that could drift.
+
+Two traps this module exists to absorb, both found by a solver rather than by me:
+
+  - the judge's rows follow the `headers` order, which need not match the schema's
+    column order. For `combine-two-tables` they differ, and inserting positionally
+    silently transposes first and last names. `build_from_example` reorders.
+  - `exampleTestcases` is not always one JSON document. Some problems ship several
+    newline-separated ones, and some carry an `argument` key the judge passes to a
+    stored function. `parse_example_documents` handles both.
 """
 import json
+import os
 import sqlite3
 
 # LeetCode's type names are PostgreSQL's; SQLite accepts almost any type name and
@@ -37,13 +47,15 @@ TYPE_MAP = {
     'DOUBLE': 'REAL',
 }
 
+META_FILENAME = 'sql-shell-meta.json'
+
 
 def load_sql(filename):
-    """Return the SQL text of a solution file, with comments stripped.
+    """Return the SQL text of a solution file, with the header comment stripped.
 
-    The files carry the repository's header comment block, which SQLite would
-    reject if it reached the parser, so leading `--` lines are removed. Comments
-    after the first statement are kept: a query may legitimately contain them.
+    The files carry the repository's header block, which SQLite would reject if it
+    reached the parser, so leading `--` lines are removed. Comments after the
+    first statement are kept: a query may legitimately contain them.
     """
     from _loader import SOLUTIONS_DIR
 
@@ -74,9 +86,11 @@ def sqlite_type(declared):
 def build(schema, rows):
     """Build an in-memory database from a schema dict and a rows dict.
 
-    ``schema`` maps table -> {column: type}, ``rows`` maps table -> list of row
-    lists in the same column order, which is how LeetCode's exampleTestcases
-    encodes them.
+    ``schema`` maps table -> {column: type}. ``rows`` maps table -> list of row
+    lists **in that same schema column order** - this low-level function does not
+    reorder, because a caller passing hand-built fixtures wants exactly what it
+    wrote. Use ``build_from_example`` for the judge's own data, which follows the
+    ``headers`` order instead and may differ.
     """
     connection = sqlite3.connect(':memory:')
     for table, columns in schema.items():
@@ -105,27 +119,99 @@ def as_multiset(rows):
     return sorted(rows, key=lambda row: tuple('' if v is None else str(v) for v in row))
 
 
-def parse_example_testcases(text):
-    """Turn an exampleTestcases string into (schema_rows, table_rows).
+def parse_example_documents(text):
+    """Parse an exampleTestcases payload into a list of documents.
 
-    The payload looks like
-    ``{"headers": {"T": [...]}, "rows": {"T": [[...], ...]}}``.
+    The payload is usually one JSON object, but some problems ship several
+    separated by newlines, and a document may carry an ``argument`` that the judge
+    passes to a stored function. Returns a list of dicts, each with whatever of
+    ``headers``, ``rows`` and ``argument`` the payload provided.
     """
-    payload = json.loads(text)
-    return payload.get('rows') or {}, payload.get('headers') or {}
+    documents = []
+    decoder = json.JSONDecoder()
+    index = 0
+    while index < len(text):
+        while index < len(text) and text[index] in ' \t\r\n':
+            index += 1
+        if index >= len(text):
+            break
+        document, index = decoder.raw_decode(text, index)
+        documents.append(document)
+    return documents
+
+
+def parse_example_testcases(text):
+    """The first example document's rows and headers, as a convenience pair."""
+    documents = parse_example_documents(text)
+    if not documents:
+        return {}, {}
+    return documents[0].get('rows') or {}, documents[0].get('headers') or {}
+
+
+def reorder_rows(rows, headers, columns):
+    """Put each row into ``columns`` order, reading it in ``headers`` order.
+
+    This is the fix for the transposition: the judge's rows are positional in
+    ``headers`` order, while ``build`` wants the schema's column order, and the
+    two differ whenever a problem lists its columns differently from its DDL.
+    """
+    if not headers:
+        return rows
+    if list(headers) == list(columns):
+        return rows
+    positions = {name: index for index, name in enumerate(headers)}
+    missing = [name for name in columns if name not in positions]
+    if missing:
+        raise ValueError(
+            f'headers {headers} do not cover schema columns {columns}; '
+            f'missing {missing}')
+    return [[row[positions[name]] for name in columns] for row in rows]
 
 
 def build_from_example(schema, example_testcases):
-    """Build a database from the problem's schema and its example testcases."""
-    table_rows, _ = parse_example_testcases(example_testcases)
-    return build(schema, table_rows)
+    """Build a database from a problem's schema and its example testcases.
 
-
-def schema_from_metadata(meta_data):
-    """Extract database_schema from a problem's metaData payload.
-
-    ``meta_data`` may be the raw JSON string LeetCode returns or an already
-    parsed dict.
+    Rows are reordered from ``headers`` order into schema order, so the values land
+    in the right columns.
     """
-    payload = json.loads(meta_data) if isinstance(meta_data, str) else meta_data
-    return payload.get('database_schema') or {}
+    table_rows, headers = parse_example_testcases(example_testcases)
+    ordered = {
+        table: reorder_rows(rows, headers.get(table), list(schema[table]))
+        for table, rows in table_rows.items()
+        if table in schema
+    }
+    return build(schema, ordered)
+
+
+def load_problem_meta(slug, state_dir=None):
+    """Return one problem's SQL metadata from the pipeline's cache.
+
+    The cache is written by the tooling that fetches the problems; it holds the
+    schema, the CREATE statements and the judge's example testcases.
+    """
+    directory = state_dir or os.environ.get('LC_STATE') or os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        'tools', 'agent', 'state')
+    with open(os.path.join(directory, META_FILENAME), encoding='utf-8') as handle:
+        meta = json.load(handle)
+    if slug not in meta:
+        raise KeyError(f'{slug} is not in {META_FILENAME}')
+    return meta[slug]
+
+
+def build_from_problem(slug, state_dir=None):
+    """Build the judge's example database for a problem, and return it with its
+    arguments.
+
+    Returns ``(connection, arguments)`` where ``arguments`` is the list of
+    ``argument`` values the example documents carried, which is what a stored
+    function problem needs.
+    """
+    meta = load_problem_meta(slug, state_dir)
+    connection = build_from_example(meta['databaseSchema'], meta['exampleTestcases'])
+    arguments = [
+        document['argument']
+        for document in parse_example_documents(meta['exampleTestcases'])
+        if 'argument' in document
+    ]
+    return connection, arguments
