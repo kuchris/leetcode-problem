@@ -74,9 +74,15 @@ const BASE = `http://127.0.0.1:${PORT}`;
 const STOP_FILE = ledgerPath ? join(ledgerPath, '..', 'STOP') : null;
 // The driver's private ledger. It sits beside the main one and is written only
 // by the driver, so the two never contend for the same file.
+//
+// Single-run mode used to pass no ledger at all, which made recordAccepted() an
+// early return and left its acceptances unrecorded - so a later watch window
+// re-submitted them as duplicates. It now derives the session ledger from the
+// results file's directory, which is always known, so an acceptance is recorded
+// however the driver was invoked.
 const SESSION_LEDGER = ledgerPath
   ? join(dirname(ledgerPath), 'session-accepted.json')
-  : null;
+  : join(dirname(resultsFile), 'session-accepted.json');
 
 async function readJson(path, fallback) {
   if (!path) return fallback;

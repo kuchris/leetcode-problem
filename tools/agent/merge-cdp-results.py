@@ -43,8 +43,16 @@ if os.path.exists(session_path):
         }
         updated += 1
 
-# 2. The result files.
-patterns = ('cdp*result*.json', 'parallel-*-result.json', 'submit-*-result.json')
+# 2. The result files. The patterns cover every shape a run has produced, so a
+#    new mode's output is picked up by the merge rather than needing a one-off
+#    script - which is how two verified acceptances were once left unrecorded,
+#    leaving them pending for the next window to submit again as duplicates.
+patterns = (
+    'cdp*result*.json',
+    'parallel-*-result.json',
+    'submit-*-result.json',
+    'verify-*-result.json',
+)
 seen = set()
 for pattern in patterns:
     for path in sorted(glob.glob(os.path.join(DIR, pattern))):
