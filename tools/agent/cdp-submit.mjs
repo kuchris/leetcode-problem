@@ -7,6 +7,12 @@
 //
 // Zero dependencies: Node's built-in fetch and WebSocket are enough.
 //
+// Three languages are submitted, chosen by file extension:
+//   .py  -> python3      .sql -> postgresql      .sh -> bash
+// The SQL slug is postgresql because LeetCode offers mysql, mssql, postgresql,
+// oraclesql and pythondata for database problems (PostgreSQL 16), and postgresql
+// is the dialect this repository targets.
+//
 // Single run:
 //   node cdp-submit.mjs <tasks.json> <results.json> [interDelayMs] [port] [ledger.json]
 //
@@ -23,11 +29,19 @@
 import { spawn } from 'node:child_process';
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, extname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 const CHROME = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+// Extension -> LeetCode langSlug. A file whose extension is absent here is not
+// a submission candidate, which is what keeps helper modules out of the queue.
+const LANG_BY_EXT = {
+  '.py': 'python3',
+  '.sql': 'postgresql',
+  '.sh': 'bash',
+};
 
 const session = process.env.LEETCODE_SESSION;
 if (!session) {
@@ -78,8 +92,11 @@ async function scanPending(ledger, session, questionIds) {
   const names = await readdir(solutionsDir);
   const found = [];
   for (const name of names) {
-    if (!name.endsWith('.py') || name.startsWith('_')) continue;
-    const stem = name.slice(0, -3);
+    if (name.startsWith('_')) continue;
+    const ext = extname(name);
+    const lang = LANG_BY_EXT[ext];
+    if (!lang) continue;
+    const stem = name.slice(0, -ext.length);
     const dash = stem.indexOf('-');
     if (dash < 0) continue;
     const frontendId = Number(stem.slice(0, dash));
@@ -92,6 +109,7 @@ async function scanPending(ledger, session, questionIds) {
       frontendId,
       slug,
       questionId: questionIds[slug],
+      lang,
       path: join(solutionsDir, name),
     });
   }
@@ -194,7 +212,7 @@ async function connectPage() {
   throw new Error('no page target available');
 }
 
-const SUBMIT_SCRIPT = `async ([slug, questionId, code]) => {
+const SUBMIT_SCRIPT = `async ([slug, questionId, code, lang]) => {
   const csrf = (document.cookie.match(/(?:^|;\\s*)csrftoken=([^;]+)/) || [])[1] || '';
   const submitResponse = await fetch('/problems/' + slug + '/submit/', {
     method: 'POST',
@@ -203,7 +221,7 @@ const SUBMIT_SCRIPT = `async ([slug, questionId, code]) => {
       'x-csrftoken': csrf,
       'Referer': 'https://leetcode.com/problems/' + slug + '/',
     },
-    body: JSON.stringify({ lang: 'python3', question_id: questionId, typed_code: code }),
+    body: JSON.stringify({ lang: lang, question_id: questionId, typed_code: code }),
   });
   const submitText = await submitResponse.text();
   let submitJson = null;
@@ -270,12 +288,25 @@ async function recordAccepted(record) {
   }
 }
 
+/**
+ * The langSlug to submit with.
+ *
+ * Watch mode sets it while scanning; single-run mode takes tasks from a JSON
+ * file that may predate multi-language support, so fall back to the file
+ * extension and then to python3.
+ */
+function langFor(task) {
+  if (task.lang) return task.lang;
+  const ext = extname(task.path ?? '');
+  return LANG_BY_EXT[ext] ?? 'python3';
+}
+
 async function attempt(cdp, task, code) {
   const navigation = cdp.waitFor('Page.loadEventFired', 60000);
   await cdp.send('Page.navigate', { url: `https://leetcode.com/problems/${task.slug}/` });
   await navigation;
   const evaluated = await cdp.send('Runtime.evaluate', {
-    expression: `(${SUBMIT_SCRIPT})(${JSON.stringify([task.slug, task.questionId, code])})`,
+    expression: `(${SUBMIT_SCRIPT})(${JSON.stringify([task.slug, task.questionId, code, langFor(task)])})`,
     awaitPromise: true,
     returnByValue: true,
   });
